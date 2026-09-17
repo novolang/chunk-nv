@@ -1,0 +1,95 @@
+// chunkfault.nv — the four ways a split is asked for impossibly.
+//
+// THE REFUSALS ARE ALL ABOUT THE CONFIGURATION, NOT THE TEXT
+//
+// There is no text this package refuses.  A document with no
+// separators in it, a document that is one enormous word, a document
+// that is empty: each of those has a right answer and the answer is
+// given.  What is refused is a configuration that has no right answer
+// at all — a chunk size of zero, an overlap as large as the chunk —
+// and the point of refusing is that both of those produce an infinite
+// list of chunks rather than a wrong one.
+//
+// OVERLAP AS LARGE AS THE CHUNK DOES NOT TERMINATE
+//
+// The next chunk starts `size - overlap` after the previous one.  When
+// the overlap equals the size the step is zero, and the splitter emits
+// the same chunk for ever.  A library that clamped it would be
+// choosing a retrieval parameter for its caller, silently, and the
+// caller would be left wondering why its recall did not change.
+
+// Why a split could not be made.
+//
+// ```novo
+// use chunkfault
+//
+// fn main() [io]
+//     println(ChunkOverlapNotSmaller(200, 200).message())
+// ```
+pub enum ChunkFault
+    // A chunk size of zero or less.
+    ChunkSizeNotPositive(given: Int)
+    // An overlap that is not smaller than the chunk size.  The step
+    // between chunks is `size - overlap`, so this one does not
+    // terminate.
+    ChunkOverlapNotSmaller(overlap: Int, size: Int)
+    // A negative overlap.
+    ChunkOverlapNegative(given: Int)
+    // A recursive split with no separators to try.  The recursion has
+    // to end at a character split, and a caller that supplied an empty
+    // list meant something else.
+    ChunkNoSeparators
+    // A span whose start is not before its end, or which runs past the
+    // source.  Answered by `chunkspan.text_of` and by the span
+    // constructors, so a span that exists is a span that can be sliced.
+    ChunkSpanOutOfRange(start: Int, end: Int, source_bytes: Int)
+    // A tokenizer that answered a negative count.  A caller's function
+    // value is being used as a measure, and a measure that goes
+    // backwards makes every chunk boundary meaningless — so it is
+    // caught at the first call rather than producing chunks nobody can
+    // explain.
+    ChunkCountNegative(given: Int)
+    // The recursion went deeper than the separator list is long plus
+    // the character fallback.  A bound against a separator list that
+    // contains the empty string, which would recurse without
+    // consuming anything.
+    ChunkRecursionTooDeep(limit: Int)
+
+// `ChunkFault` is an `Error`, which is what lets `Result<T,
+// ChunkFault>` exist at all.
+impl Error for ChunkFault
+    // The one-line message, naming the numbers.
+    //
+    // Panics with `not implemented` until the bodies land.
+    fn message(self) -> Str
+        todo("chunk-nv.ChunkFault.message")
+
+// A short stable code for logs: `"overlap_not_smaller"`,
+// `"size_not_positive"`, and so on.
+//
+// ```novo
+// use chunkfault
+//
+// fn main() [io]
+//     println(chunkfault.code(ChunkNoSeparators))   // no_separators
+// ```
+pub fn code(f: ChunkFault) -> Str []
+    todo("chunk-nv.chunkfault.code")
+
+// Whether the refusal is about the splitting configuration rather than
+// about the source or the tokenizer.
+//
+// True for the size, the overlaps and the empty separator list — the
+// four a caller fixes by choosing different numbers before it splits
+// anything, and therefore the four a program should check once at
+// start-up rather than per document.
+//
+// ```novo
+// use chunkfault
+//
+// fn main() [io]
+//     println("${chunkfault.is_configuration(ChunkSizeNotPositive(0))}")     // true
+//     println("${chunkfault.is_configuration(ChunkCountNegative(0 - 1))}")   // false
+// ```
+pub fn is_configuration(f: ChunkFault) -> Bool []
+    todo("chunk-nv.chunkfault.is_configuration")

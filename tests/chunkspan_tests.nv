@@ -1,0 +1,181 @@
+// chunkspan_tests.nv — a chunk is a range of bytes in the caller's
+// source, and the invariants that keeps.
+//
+// RED ON PURPOSE: every body under `src/` is a `todo()`, so every
+// assertion here reaches `not implemented: chunk-nv.chunkspan.<fn>`.
+
+use std.test
+use std.str
+use chunkfault
+use chunkspan
+
+@test
+fn test_a_span_that_exists_is_a_span_that_can_be_sliced() [io]
+    test.case("an ordinary range")
+    match chunkspan.span(0, 5, 11)
+        Ok(s)  =>
+            test.assert(s.start == 0)
+            test.assert(s.end == 5)
+            test.assert(chunkspan.byte_length(s) == 5)
+        Err(e) => test.fail(e.message())
+
+    test.case("an empty range is legal and is empty")
+    match chunkspan.span(3, 3, 11)
+        Ok(s)  =>
+            test.assert(chunkspan.is_empty(s))
+            test.assert(chunkspan.byte_length(s) == 0)
+        Err(e) => test.fail(e.message())
+
+    test.case("an inverted range is refused")
+    match chunkspan.span(5, 2, 11)
+        Ok(_)  => test.fail("that range runs backwards")
+        Err(e) => test.assert(chunkfault.code(e) == "span_out_of_range")
+
+    test.case("and one past the end of the source is refused")
+    match chunkspan.span(0, 99, 11)
+        Ok(_)  => test.fail("the source is eleven bytes")
+        Err(e) => test.assert(chunkfault.code(e) == "span_out_of_range")
+
+@test
+fn test_a_span_turns_back_into_text_and_that_is_the_only_copy() [io]
+    test.case("the text a span names")
+    match chunkspan.span(0, 5, 11)
+        Ok(s)  => test.assert(chunkspan.text_of(s, "hello world") == "hello")
+        Err(e) => test.fail(e.message())
+
+    test.case("and the tail")
+    match chunkspan.span(6, 11, 11)
+        Ok(s)  => test.assert(chunkspan.text_of(s, "hello world") == "world")
+        Err(e) => test.fail(e.message())
+
+    test.case("an empty span is an empty string")
+    match chunkspan.span(3, 3, 11)
+        Ok(s)  => test.assert(str.len(chunkspan.text_of(s, "hello world")) == 0)
+        Err(e) => test.fail(e.message())
+
+@test
+fn test_a_piece_carries_its_measure_so_the_tokenizer_is_called_once() [io]
+    // Calling a caller's tokenizer again to re-ask a question already
+    // answered is the most expensive thing this package could do.
+    test.case("a piece knows where it is, which it is, and how large")
+    match chunkspan.span(0, 5, 11)
+        Err(e) => test.fail(e.message())
+        Ok(s)  =>
+            let p = chunkspan.piece(s, 2, 5)
+            test.assert(p.index == 2)
+            test.assert(p.measure == 5)
+            test.assert(chunkspan.byte_length(p.span) == 5)
+
+    test.case("and its text comes from the source")
+    match chunkspan.span(6, 11, 11)
+        Err(e) => test.fail(e.message())
+        Ok(s)  =>
+            test.assert(chunkspan.piece_text(chunkspan.piece(s, 1, 5),
+                                             "hello world") == "world")
+
+@test
+fn test_overlap_is_measured_between_spans_not_assumed() [io]
+    test.case("two spans that share bytes overlap")
+    match chunkspan.span(0, 6, 11)
+        Err(e) => test.fail(e.message())
+        Ok(a)  =>
+            match chunkspan.span(4, 11, 11)
+                Err(e) => test.fail(e.message())
+                Ok(b)  =>
+                    test.assert(chunkspan.overlaps(a, b))
+                    test.assert(chunkspan.overlap_bytes(a, b) == 2)
+
+    test.case("two that touch but do not share do not overlap")
+    match chunkspan.span(0, 5, 11)
+        Err(e) => test.fail(e.message())
+        Ok(a)  =>
+            match chunkspan.span(5, 11, 11)
+                Err(e) => test.fail(e.message())
+                Ok(b)  =>
+                    test.assert(not chunkspan.overlaps(a, b))
+                    test.assert(chunkspan.overlap_bytes(a, b) == 0)
+
+    test.case("and two apart do not")
+    match chunkspan.span(0, 2, 11)
+        Err(e) => test.fail(e.message())
+        Ok(a)  =>
+            match chunkspan.span(6, 11, 11)
+                Ok(b)  => test.assert(not chunkspan.overlaps(a, b))
+                Err(e) => test.fail(e.message())
+
+@test
+fn test_a_span_is_what_turns_a_retrieved_chunk_back_into_a_place() [io]
+    // The reason a chunk carries a span is that a retrieval system's
+    // whole job is to say where an answer came from, and a copied
+    // string cannot.
+    test.case("no pieces cover no offset")
+    match chunkspan.piece_at([], 4)
+        Some(_) => test.fail("there are no pieces")
+        None    => test.assert(true)
+
+    test.case("a piece covers the offsets inside it")
+    match chunkspan.span(0, 5, 11)
+        Err(e) => test.fail(e.message())
+        Ok(s)  =>
+            let ps = [chunkspan.piece(s, 0, 5)]
+            match chunkspan.piece_at(ps, 2)
+                Some(p) => test.assert(p.index == 0)
+                None    => test.fail("offset 2 is inside 0..5")
+
+    test.case("and not the offsets outside it")
+    match chunkspan.span(0, 5, 11)
+        Err(e) => test.fail(e.message())
+        Ok(s)  =>
+            match chunkspan.piece_at([chunkspan.piece(s, 0, 5)], 9)
+                Some(_) => test.fail("offset 9 is outside 0..5")
+                None    => test.assert(true)
+
+@test
+fn test_the_coverage_invariant_is_checkable() [io]
+    // A splitter that dropped a character — a separator it consumed
+    // and did not put anywhere — fails this, and it is the bug a
+    // splitter is most likely to have.
+    test.case("no pieces cover an empty source")
+    test.assert(chunkspan.covers_source([], 0))
+
+    test.case("no pieces do not cover a non-empty one")
+    test.assert(not chunkspan.covers_source([], 11))
+
+    test.case("one piece covering the whole source does")
+    match chunkspan.span(0, 11, 11)
+        Ok(s)  => test.assert(chunkspan.covers_source([chunkspan.piece(s, 0, 11)], 11))
+        Err(e) => test.fail(e.message())
+
+    test.case("and a gap does not")
+    match chunkspan.span(0, 4, 11)
+        Err(e) => test.fail(e.message())
+        Ok(a)  =>
+            match chunkspan.span(6, 11, 11)
+                Err(e) => test.fail(e.message())
+                Ok(b)  =>
+                    test.assert(not chunkspan.covers_source(
+                        [chunkspan.piece(a, 0, 4), chunkspan.piece(b, 1, 5)], 11))
+
+@test
+fn test_rejoining_gives_the_source_back() [io]
+    // The other half of the invariant: with an overlap of zero the
+    // chunks concatenate back to the source exactly.
+    test.case("no pieces rejoin to nothing")
+    test.assert(str.len(chunkspan.rejoin([], "hello")) == 0)
+
+    test.case("one piece covering everything rejoins to the source")
+    match chunkspan.span(0, 11, 11)
+        Ok(s)  => test.assert(chunkspan.rejoin([chunkspan.piece(s, 0, 11)],
+                                               "hello world") == "hello world")
+        Err(e) => test.fail(e.message())
+
+    test.case("and two abutting pieces rejoin to it too")
+    match chunkspan.span(0, 6, 11)
+        Err(e) => test.fail(e.message())
+        Ok(a)  =>
+            match chunkspan.span(6, 11, 11)
+                Err(e) => test.fail(e.message())
+                Ok(b)  =>
+                    test.assert(chunkspan.rejoin([chunkspan.piece(a, 0, 6),
+                                                  chunkspan.piece(b, 1, 5)],
+                                                 "hello world") == "hello world")

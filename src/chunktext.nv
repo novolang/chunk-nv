@@ -1,0 +1,218 @@
+// chunktext.nv — the three splitters that work on text alone.
+//
+// THERE IS NO STANDARD HERE, SO THE RULES ARE WRITTEN DOWN
+//
+// Nothing specifies how to split text for retrieval.  The reference
+// implementations — the Rust crate `text-splitter` and LangChain's
+// text splitters — agree on the shape and differ in the details, and
+// every splitter in the world differs from every other on a paragraph
+// that is longer than the limit.
+//
+// So this package states its rules rather than pointing at one, and
+// the two that matter are:
+//
+//   NO CHUNK EXCEEDS THE LIMIT unless a single indivisible unit does.
+//   A word longer than the limit is emitted alone and over-size, and
+//   `ChunkPiece.measure` says so, because the alternative is cutting a
+//   word in half and the alternative to that is dropping it.
+//
+//   WITH AN OVERLAP OF ZERO THE CHUNKS CONCATENATE BACK TO THE SOURCE.
+//   Every byte of the source is in exactly one chunk, separators
+//   included.  A splitter that ate its separators would produce chunks
+//   a caller cannot rejoin, and a caller that has to cite a passage
+//   would find its offsets drifting.
+//
+// THE SEPARATOR LIST IS THE CONFIGURATION
+//
+// `split_recursive` tries the separators in order: paragraph breaks
+// first, then line breaks, then sentences, then words, and a character
+// split when nothing else fits.  The ORDER is the whole configuration,
+// and it is the caller's, because it encodes what the document is:
+// prose wants paragraph-then-sentence, a transcript wants
+// speaker-then-line, and source code wants neither.
+
+use chunksize
+
+// The default separators for prose, most specific boundary first:
+// `"\n\n"`, `"\n"`, `"。"`, `". "`, `" "`.
+//
+// The two Japanese and English sentence marks are both there because a
+// document is often both, and a separator that never occurs costs one
+// failed search.
+//
+// ```novo
+// use std.list
+// use chunktext
+//
+// fn main() [io]
+//     println("${list.len(chunktext.prose_separators()) >= 4}")   // true
+// ```
+pub fn prose_separators() -> [Str] []
+    todo("chunk-nv.chunktext.prose_separators")
+
+// The default separators for source code: a blank line, a line, a
+// space.
+//
+// Deliberately crude.  Splitting code by its syntax tree needs a
+// parser per language, and that is named in the README as not
+// included.
+//
+// ```novo
+// use std.list
+// use chunktext
+//
+// fn main() [io]
+//     println("${list.len(chunktext.code_separators()) >= 2}")   // true
+// ```
+pub fn code_separators() -> [Str] []
+    todo("chunk-nv.chunktext.code_separators")
+
+// Split by the measure alone, cutting wherever the limit is reached.
+//
+// THE SPLITTER THAT RESPECTS NOTHING, and it is here because sometimes
+// that is what is wanted: a fixed-size window over a log, a
+// transcript with no punctuation, a language this package has no
+// separators for.  It never cuts a UTF-8 sequence in half, so a limit
+// in bytes is an upper bound that may be undershot by up to three.
+//
+// ```novo
+// use std.list
+// use chunktext
+// use chunksize
+//
+// fn main() [io]
+//     match chunksize.no_overlap(chunksize.by_chars(), 5)
+//         Err(e) => println(e.message())
+//         Ok(l)  =>
+//             match chunktext.split_fixed("hello world", l)
+//                 Ok(ps) => println("${list.len(ps)}")   // 3
+//                 Err(e) => println(e.message())
+// ```
+pub fn split_fixed(source: Str, l: ChunkLimit) -> Result<[ChunkPiece], ChunkFault> []
+    todo("chunk-nv.chunktext.split_fixed")
+
+// Split at the separators, in order, falling back to the next when a
+// piece is still too large.
+//
+// THE ORDINARY SPLITTER.  The first separator is tried over the whole
+// source; every piece that still exceeds the limit is split by the
+// second; and so on, with a fixed split at the end for a piece that no
+// separator divides.  Adjacent pieces that fit together under the
+// limit are then merged, which is what keeps a document of one-line
+// paragraphs from becoming one chunk per line.
+//
+// `ChunkNoSeparators` for an empty list: the caller meant
+// `split_fixed`.
+//
+// ```novo
+// use std.list
+// use chunktext
+// use chunksize
+//
+// fn main() [io]
+//     match chunksize.limit(chunksize.by_chars(), 100, 10)
+//         Err(e) => println(e.message())
+//         Ok(l)  =>
+//             match chunktext.split_recursive("a\n\nb", l, chunktext.prose_separators())
+//                 Ok(ps) => println("${list.len(ps)}")   // 1 — both fit
+//                 Err(e) => println(e.message())
+// ```
+pub fn split_recursive(source: Str, l: ChunkLimit,
+                       separators: [Str]) -> Result<[ChunkPiece], ChunkFault> []
+    todo("chunk-nv.chunktext.split_recursive")
+
+// Split at the separators with the prose defaults.
+//
+// ```novo
+// use std.list
+// use chunktext
+// use chunksize
+//
+// fn main() [io]
+//     match chunksize.limit(chunksize.by_chars(), 100, 10)
+//         Err(e) => println(e.message())
+//         Ok(l)  =>
+//             match chunktext.split_prose("one paragraph", l)
+//                 Ok(ps) => println("${list.len(ps)}")   // 1
+//                 Err(e) => println(e.message())
+// ```
+pub fn split_prose(source: Str, l: ChunkLimit) -> Result<[ChunkPiece], ChunkFault> []
+    todo("chunk-nv.chunktext.split_prose")
+
+// Split so that no chunk exceeds a token count, with the caller's
+// counter.
+//
+// The convenience for the commonest configuration: a token limit, an
+// overlap in tokens, and the prose separators.  It is
+// `split_recursive` with a `ChunkByTokens` limit, spelled so that the
+// ordinary case does not have to build one.
+//
+// ```novo
+// use std.str
+// use std.list
+// use chunktext
+//
+// fn main() [io]
+//     match chunktext.split_by_tokens("some text", 256, 32, s => str.len(s) / 4)
+//         Ok(ps) => println("${list.len(ps)}")   // 1
+//         Err(e) => println(e.message())
+// ```
+pub fn split_by_tokens(source: Str, size: Int, overlap: Int,
+                       count: fn(Str) -> Int) -> Result<[ChunkPiece], ChunkFault> []
+    todo("chunk-nv.chunktext.split_by_tokens")
+
+// The offsets in the source at which a separator occurs, in order.
+//
+// Public because a caller writing its own splitting rule wants the
+// boundaries without the chunking, and because a caller checking why a
+// split came out the way it did wants to see them.
+//
+// ```novo
+// use std.list
+// use chunktext
+//
+// fn main() [io]
+//     println("${list.len(chunktext.separator_offsets("a\n\nb", "\n\n"))}")   // 1
+// ```
+pub fn separator_offsets(source: Str, separator: Str) -> [Int] []
+    todo("chunk-nv.chunktext.separator_offsets")
+
+// Whether a list of pieces holds the two invariants: no piece over the
+// limit unless it is one indivisible unit, and the pieces cover the
+// source.
+//
+// THE PREDICATE THE SUITE IS WRITTEN AGAINST, public because a caller
+// writing its own splitter against `ChunkPiece` should be able to
+// check it the same way.
+//
+// ```novo
+// use chunktext
+// use chunksize
+//
+// fn main() [io]
+//     match chunksize.no_overlap(chunksize.by_chars(), 5)
+//         Ok(l)  => println("${chunktext.is_well_formed([], "", l)}")   // true
+//         Err(e) => println(e.message())
+// ```
+pub fn is_well_formed(pieces: [ChunkPiece], source: Str, l: ChunkLimit) -> Bool []
+    todo("chunk-nv.chunktext.is_well_formed")
+
+// The pieces that exceed the limit: the indivisible units.
+//
+// A word longer than the chunk size, a line with no spaces, a
+// base64 blob in a document.  Each is emitted whole and over-size, and
+// this is how a caller finds out — before it sends one to a model that
+// will refuse it.
+//
+// ```novo
+// use std.list
+// use chunktext
+// use chunksize
+//
+// fn main() [io]
+//     match chunksize.no_overlap(chunksize.by_chars(), 5)
+//         Ok(l)  => println("${list.len(chunktext.oversize_pieces([], l))}")   // 0
+//         Err(e) => println(e.message())
+// ```
+pub fn oversize_pieces(pieces: [ChunkPiece], l: ChunkLimit) -> [ChunkPiece] []
+    todo("chunk-nv.chunktext.oversize_pieces")

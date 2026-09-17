@@ -1,0 +1,244 @@
+// chunkspan.nv — a chunk is a range of bytes in the caller's source,
+// not a copy of them.
+//
+// A RETRIEVAL PIPELINE HAS TO CITE
+//
+// The reason a chunk carries a span is not memory.  It is that a
+// retrieval-augmented system's whole job is to say where an answer
+// came from, and a chunk that is a copied string cannot: by the time
+// the answer is produced, nothing connects the text back to a position
+// in a document.  A span does, exactly, for ever, through any number
+// of stores and indexes — because it is two integers and they mean
+// something without the string beside them.
+//
+// It is also the memory answer.  Chunking a ten-megabyte document at a
+// thousand characters with two hundred of overlap produces about
+// twelve thousand chunks totalling twelve megabytes of copied text; as
+// spans it is twelve thousand pairs of integers and the document the
+// caller already had.
+//
+// BYTES, NOT CHARACTERS
+//
+// A span is a BYTE offset, because that is what slicing a `Str` takes
+// and what a source map, an editor and a diff all speak.  The SIZE of
+// a chunk is measured in whatever unit the caller chose — characters,
+// bytes, tokens — and the two are different questions.  A chunk of 200
+// characters of Japanese is 600 bytes, and both numbers are right.
+//
+// EVERY SPAN IS ON A CHARACTER BOUNDARY
+//
+// The splitters never cut a UTF-8 sequence in half, whatever the size
+// limit says, because a chunk that is not valid text is of no use to
+// anything downstream.  A size limit in bytes is therefore an upper
+// bound that may be undershot by up to three bytes, and the README
+// says so.
+
+// A range of bytes in the source.
+//
+// ```novo
+// use chunkspan
+//
+// fn main() [io]
+//     match chunkspan.span(0, 5, 11)
+//         Ok(s)  => println("${chunkspan.byte_length(s)}")   // 5
+//         Err(e) => println(e.message())
+// ```
+pub struct ChunkSpan
+    // The first byte, counted from the start of the source.
+    start: Int
+    // One past the last byte.
+    end: Int
+
+// One chunk: where it is, which number it is, and how large it was
+// measured to be.
+//
+// The measured size is carried rather than recomputed because it is
+// the tokenizer's answer, and calling a caller's tokenizer again to
+// re-ask a question already answered is the most expensive thing this
+// package could do.
+//
+// ```novo
+// use chunkspan
+//
+// fn main() [io]
+//     match chunkspan.span(0, 5, 11)
+//         Ok(s)  => println("${chunkspan.piece(s, 0, 5).index}")   // 0
+//         Err(e) => println(e.message())
+// ```
+pub struct ChunkPiece
+    // Where the chunk is in the source.
+    span: ChunkSpan
+    // Which chunk this is, counting from zero.
+    index: Int
+    // How large it measured, in the unit the split was configured
+    // with.  Not the byte length unless the unit was bytes.
+    measure: Int
+
+// A span, or `ChunkSpanOutOfRange`.
+//
+// A span that exists is a span that can be sliced: the constructor is
+// where the range is checked, so nothing downstream has to.
+//
+// ```novo
+// use chunkspan
+//
+// fn main() [io]
+//     match chunkspan.span(5, 2, 11)
+//         Ok(_)  => println("this cannot happen — the range is inverted")
+//         Err(e) => println(e.message())
+// ```
+pub fn span(start: Int, end: Int, source_bytes: Int) -> Result<ChunkSpan, ChunkFault> []
+    todo("chunk-nv.chunkspan.span")
+
+// How many bytes the span covers.
+//
+// ```novo
+// use chunkspan
+//
+// fn main() [io]
+//     match chunkspan.span(3, 8, 11)
+//         Ok(s)  => println("${chunkspan.byte_length(s)}")   // 5
+//         Err(e) => println(e.message())
+// ```
+pub fn byte_length(s: ChunkSpan) -> Int []
+    todo("chunk-nv.chunkspan.byte_length")
+
+// Whether the span covers nothing.
+//
+// ```novo
+// use chunkspan
+//
+// fn main() [io]
+//     match chunkspan.span(3, 3, 11)
+//         Ok(s)  => println("${chunkspan.is_empty(s)}")   // true
+//         Err(e) => println(e.message())
+// ```
+pub fn is_empty(s: ChunkSpan) -> Bool []
+    todo("chunk-nv.chunkspan.is_empty")
+
+// The text a span names.
+//
+// The one function that turns a span back into a string, and the only
+// place a copy happens.  `source` must be the string the span was
+// produced from.
+//
+// ```novo
+// use chunkspan
+//
+// fn main() [io]
+//     match chunkspan.span(0, 5, 11)
+//         Err(e) => println(e.message())
+//         Ok(s)  => println(chunkspan.text_of(s, "hello world"))   // hello
+// ```
+pub fn text_of(s: ChunkSpan, source: Str) -> Str []
+    todo("chunk-nv.chunkspan.text_of")
+
+// A piece from a span, an index and a measure.
+//
+// ```novo
+// use chunkspan
+//
+// fn main() [io]
+//     match chunkspan.span(0, 5, 11)
+//         Ok(s)  => println("${chunkspan.piece(s, 2, 5).measure}")   // 5
+//         Err(e) => println(e.message())
+// ```
+pub fn piece(s: ChunkSpan, index: Int, measure: Int) -> ChunkPiece []
+    todo("chunk-nv.chunkspan.piece")
+
+// The text a piece names.
+//
+// ```novo
+// use chunkspan
+//
+// fn main() [io]
+//     match chunkspan.span(6, 11, 11)
+//         Err(e) => println(e.message())
+//         Ok(s)  => println(chunkspan.piece_text(chunkspan.piece(s, 1, 5), "hello world"))
+// ```
+pub fn piece_text(p: ChunkPiece, source: Str) -> Str []
+    todo("chunk-nv.chunkspan.piece_text")
+
+// Whether two spans share any byte.
+//
+// What a caller checks to find the overlap between consecutive chunks,
+// and what a highlighter uses to find which chunks cover a position.
+//
+// ```novo
+// use chunkspan
+//
+// fn main() [io]
+//     match chunkspan.span(0, 6, 11)
+//         Err(e) => println(e.message())
+//         Ok(a)  =>
+//             match chunkspan.span(4, 11, 11)
+//                 Ok(b)  => println("${chunkspan.overlaps(a, b)}")   // true
+//                 Err(e) => println(e.message())
+// ```
+pub fn overlaps(a: ChunkSpan, b: ChunkSpan) -> Bool []
+    todo("chunk-nv.chunkspan.overlaps")
+
+// How many bytes two spans share.
+//
+// ```novo
+// use chunkspan
+//
+// fn main() [io]
+//     match chunkspan.span(0, 6, 11)
+//         Err(e) => println(e.message())
+//         Ok(a)  =>
+//             match chunkspan.span(4, 11, 11)
+//                 Ok(b)  => println("${chunkspan.overlap_bytes(a, b)}")   // 2
+//                 Err(e) => println(e.message())
+// ```
+pub fn overlap_bytes(a: ChunkSpan, b: ChunkSpan) -> Int []
+    todo("chunk-nv.chunkspan.overlap_bytes")
+
+// The piece covering a byte offset, or `None`.
+//
+// WHAT TURNS A RETRIEVED CHUNK BACK INTO A PLACE IN A DOCUMENT, and
+// the reverse: a caller that has a cursor position and wants to know
+// which chunk a reader is looking at.  With overlap, several pieces
+// can cover one offset and this answers the first.
+//
+// ```novo
+// use chunkspan
+//
+// fn main() [io]
+//     match chunkspan.piece_at([], 4)
+//         Some(_) => println("this cannot happen — there are no pieces")
+//         None    => println("no chunk covers that offset")
+// ```
+pub fn piece_at(pieces: [ChunkPiece], offset: Int) -> ?ChunkPiece []
+    todo("chunk-nv.chunkspan.piece_at")
+
+// Whether a list of pieces covers the whole source with no gap.
+//
+// THE INVARIANT EVERY SPLITTER HOLDS: with an overlap of zero the
+// chunks concatenate back to the source exactly, and with an overlap
+// they still cover it, only with repeats.  A splitter that dropped a
+// character — a separator it consumed and did not put anywhere — fails
+// this, and it is the bug a splitter is most likely to have.
+//
+// ```novo
+// use chunkspan
+//
+// fn main() [io]
+//     println("${chunkspan.covers_source([], 0)}")   // true
+// ```
+pub fn covers_source(pieces: [ChunkPiece], source_bytes: Int) -> Bool []
+    todo("chunk-nv.chunkspan.covers_source")
+
+// The pieces' spans joined back into text, with the overlap removed.
+//
+// The other half of the invariant, and the one a test asserts: this
+// equals the source whenever the pieces came from a splitter over it.
+//
+// ```novo
+// use chunkspan
+//
+// fn main() [io]
+//     println(chunkspan.rejoin([], "hello"))    // (empty)
+// ```
+pub fn rejoin(pieces: [ChunkPiece], source: Str) -> Str []
+    todo("chunk-nv.chunkspan.rejoin")

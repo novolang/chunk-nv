@@ -1,0 +1,160 @@
+// chunksize_tests.nv — the unit, the limit, and the configuration
+// refusals.
+//
+// RED ON PURPOSE: every body under `src/` is a `todo()`, so every
+// assertion here reaches `not implemented: chunk-nv.chunksize.<fn>`.
+
+use std.test
+use std.str
+use chunkfault
+use chunksize
+
+@test
+fn test_the_three_units_and_what_each_counts() [io]
+    test.case("the names")
+    test.assert(chunksize.unit_name(chunksize.by_chars()) == "chars")
+    test.assert(chunksize.unit_name(chunksize.by_bytes()) == "bytes")
+    test.assert(chunksize.unit_name(chunksize.by_tokens(s => str.len(s))) == "tokens")
+
+    test.case("characters and bytes are the same for ASCII")
+    test.assert(chunksize.measure(chunksize.by_chars(), "hello") == 5)
+    test.assert(chunksize.measure(chunksize.by_bytes(), "hello") == 5)
+
+    test.case("and different for anything else")
+    // "日本" is two characters and six bytes, and both numbers are
+    // right — which is why the size and the overlap must share a unit.
+    test.assert(chunksize.measure(chunksize.by_chars(), "日本") == 2)
+    test.assert(chunksize.measure(chunksize.by_bytes(), "日本") == 6)
+
+    test.case("a token count is whatever the caller's function says")
+    let quarter = chunksize.by_tokens(s => str.len(s) / 4)
+    test.assert(chunksize.measure(quarter, "12345678") == 2)
+
+    test.case("an empty string measures zero in every unit")
+    test.assert(chunksize.measure(chunksize.by_chars(), "") == 0)
+    test.assert(chunksize.measure(chunksize.by_bytes(), "") == 0)
+
+@test
+fn test_the_tokenizer_is_a_pure_function_value() [io]
+    // A package that depended on a tokenizer would force every
+    // consumer onto one model's vocabulary.  A trait would have
+    // dragged an effect row in: SPEC 5.6 gives effect parameters to
+    // traits, so a `core` function calling an effectful trait method
+    // leaves the budget.  A `fn(Str) -> Int` cannot.
+    test.case("a closure over a caller's own table is an ordinary value")
+    let table_size = 4
+    let counter = chunksize.by_tokens(s => str.len(s) / table_size)
+    test.assert(chunksize.measure(counter, "12345678") == 2)
+
+    test.case("and two different counters are two different units")
+    let halves = chunksize.by_tokens(s => str.len(s) / 2)
+    test.assert(chunksize.measure(halves, "12345678") == 4)
+
+@test
+fn test_a_limit_refuses_the_configurations_that_do_not_terminate() [io]
+    test.case("an ordinary limit")
+    match chunksize.limit(chunksize.by_chars(), 500, 50)
+        Ok(l)  =>
+            test.assert(l.size == 500)
+            test.assert(l.overlap == 50)
+            test.assert(chunksize.unit_name(l.unit) == "chars")
+        Err(e) => test.fail(e.message())
+
+    test.case("a size of zero is refused")
+    match chunksize.limit(chunksize.by_chars(), 0, 0)
+        Ok(_)  => test.fail("a chunk of nothing is not a chunk")
+        Err(e) => test.assert(chunkfault.code(e) == "size_not_positive")
+
+    test.case("an overlap equal to the size is refused, because the step is zero")
+    // A library that clamped it would be choosing a retrieval
+    // parameter for its caller, silently.
+    match chunksize.limit(chunksize.by_chars(), 200, 200)
+        Ok(_)  => test.fail("the step would be zero")
+        Err(e) => test.assert(chunkfault.code(e) == "overlap_not_smaller")
+
+    test.case("and one larger than the size is refused for the same reason")
+    match chunksize.limit(chunksize.by_chars(), 200, 300)
+        Ok(_)  => test.fail("the step would be negative")
+        Err(e) => test.assert(chunkfault.code(e) == "overlap_not_smaller")
+
+    test.case("a negative overlap is its own refusal")
+    match chunksize.limit(chunksize.by_chars(), 200, 0 - 1)
+        Ok(_)  => test.fail("an overlap cannot be negative")
+        Err(e) => test.assert(chunkfault.code(e) == "overlap_negative")
+
+    test.case("all four are configuration faults a program checks once")
+    test.assert(chunkfault.is_configuration(ChunkSizeNotPositive(0)))
+    test.assert(chunkfault.is_configuration(ChunkOverlapNotSmaller(200, 200)))
+    test.assert(chunkfault.is_configuration(ChunkOverlapNegative(0 - 1)))
+    test.assert(chunkfault.is_configuration(ChunkNoSeparators))
+
+    test.case("and a tokenizer that goes backwards is not")
+    test.assert(not chunkfault.is_configuration(ChunkCountNegative(0 - 1)))
+    test.assert(chunkfault.code(ChunkCountNegative(0 - 1)) == "count_negative")
+    test.assert(chunkfault.code(ChunkRecursionTooDeep(16)) == "recursion_too_deep")
+
+@test
+fn test_no_overlap_is_the_limit_the_chunks_rejoin_under() [io]
+    test.case("it sets the overlap to zero")
+    match chunksize.no_overlap(chunksize.by_chars(), 500)
+        Ok(l)  =>
+            test.assert(l.overlap == 0)
+            test.assert(l.size == 500)
+        Err(e) => test.fail(e.message())
+
+    test.case("and it still refuses a size of zero")
+    match chunksize.no_overlap(chunksize.by_chars(), 0)
+        Ok(_)  => test.fail("a chunk of nothing is not a chunk")
+        Err(e) => test.assert(chunkfault.code(e) == "size_not_positive")
+
+@test
+fn test_the_step_is_what_decides_how_many_chunks_there_are() [io]
+    test.case("size minus overlap")
+    match chunksize.limit(chunksize.by_chars(), 500, 50)
+        Ok(l)  => test.assert(chunksize.step(l) == 450)
+        Err(e) => test.fail(e.message())
+
+    test.case("with no overlap the step is the whole size")
+    match chunksize.no_overlap(chunksize.by_chars(), 500)
+        Ok(l)  => test.assert(chunksize.step(l) == 500)
+        Err(e) => test.fail(e.message())
+
+    test.case("the estimate uses it, and is an estimate")
+    match chunksize.limit(chunksize.by_chars(), 500, 50)
+        Ok(l)  => test.assert(chunksize.estimate_count(l, 5000) >= 10)
+        Err(e) => test.fail(e.message())
+
+    test.case("a source smaller than one chunk estimates one")
+    match chunksize.limit(chunksize.by_chars(), 500, 50)
+        Ok(l)  => test.assert(chunksize.estimate_count(l, 100) == 1)
+        Err(e) => test.fail(e.message())
+
+    test.case("and an empty source estimates none")
+    match chunksize.limit(chunksize.by_chars(), 500, 50)
+        Ok(l)  => test.assert(chunksize.estimate_count(l, 0) == 0)
+        Err(e) => test.fail(e.message())
+
+@test
+fn test_fits_asks_the_question_a_splitter_asks_at_every_step() [io]
+    test.case("text under the limit fits")
+    match chunksize.limit(chunksize.by_chars(), 10, 2)
+        Ok(l)  => test.assert(chunksize.fits(l, "hello"))
+        Err(e) => test.fail(e.message())
+
+    test.case("text at the limit fits")
+    match chunksize.limit(chunksize.by_chars(), 5, 1)
+        Ok(l)  => test.assert(chunksize.fits(l, "hello"))
+        Err(e) => test.fail(e.message())
+
+    test.case("and text over it does not")
+    match chunksize.limit(chunksize.by_chars(), 4, 1)
+        Ok(l)  => test.assert(not chunksize.fits(l, "hello"))
+        Err(e) => test.fail(e.message())
+
+    test.case("the unit decides — six bytes of Japanese is two characters")
+    match chunksize.limit(chunksize.by_chars(), 3, 1)
+        Ok(l)  => test.assert(chunksize.fits(l, "日本"))
+        Err(e) => test.fail(e.message())
+    match chunksize.limit(chunksize.by_bytes(), 3, 1)
+        Ok(l)  => test.assert(not chunksize.fits(l, "日本"))
+        Err(e) => test.fail(e.message())

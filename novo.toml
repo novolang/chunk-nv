@@ -1,0 +1,50 @@
+[package]
+name        = "chunk-nv"
+version     = "0.0.1"
+description = "Splitting text for retrieval: by characters, by bytes, by tokens counted by a function the caller supplies, recursively down an ordered list of separators, and markdown-aware over markdown-nv.  Every chunk carries its byte span in the source rather than a copied string, the size limit and the overlap are measured in the same unit, and an overlap that is not smaller than the chunk is refused.  Interface only — every body is a todo()."
+license     = "Apache-2.0"
+
+# An INTERFACE release: every `pub fn` body is a `todo()`, so the
+# signatures and the effect rows are published and nothing is
+# implemented.  `novo pkg publish` recognises the shape and requires
+# both the draft stability and the 0.0.x version; the first
+# implementation is the 0.1.0 published over it.
+stability   = "draft"
+
+# `core`.  Splitting is arithmetic over a string the caller already
+# holds, and the one thing that could have dragged an effect in — the
+# tokenizer — arrives as a PURE function value rather than as a
+# dependency or an effectful trait.  SPEC § 5.6 gives effect parameters
+# to traits and not to free functions, so a `core` function that called
+# an effectful trait method would inherit a concrete row and leave the
+# budget.  A `fn(Str) -> Int` cannot.
+layer       = "core"
+
+category    = "ai"
+
+tags        = ["chunking", "text-splitter", "retrieval", "rag", "tokens", "markdown", "overlap", "sans-io"]
+repository  = "https://github.com/novolang/chunk-nv"
+maintainers = ["novo-lang"]
+novo        = ">= 0.9.0"
+
+# A library: no `main`, so `novo pkg build` type-checks and
+# effect-checks every module under `src/` and writes no binary.
+
+[docs.pages]
+"README.md" = "Splitting text for retrieval, with every chunk carrying its byte span"
+
+[dependencies]
+# markdown-nv supplies the document structure the markdown-aware
+# splitter respects.  It is the right dependency for two reasons that
+# are the same reason: its pull parser's events carry `MdRange`, a pair
+# of byte offsets INTO THE CALLER'S SOURCE rather than a copied string,
+# which is exactly the shape a chunk's span already is; and its
+# `mdtree` arena gives the heading levels, the fenced code blocks and
+# the table extents that decide where a split may fall.
+#
+# The alternative was a private scanner for headings and fences, which
+# is the thing every text splitter ships and every one of them gets
+# wrong on a fence inside a list item inside a block quote.
+#
+# `core`, so the layer rule holds.  `^0.0.1` pins exactly 0.0.1.
+markdown-nv = "^0.0.1"

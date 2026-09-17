@@ -1,0 +1,224 @@
+// chunksize.nv — how a chunk is measured, and how big it may be.
+//
+// THE TOKENIZER IS A VALUE, NOT A DEPENDENCY
+//
+// A splitter needs one thing from a tokenizer: how many tokens a piece
+// of text is.  Not the tokens, not the vocabulary, not the model — the
+// count.
+//
+// So the tokenizer arrives as `fn(Str) -> Int`, a function value the
+// caller supplies.  A package that depended on a tokenizer would force
+// every consumer onto one model's vocabulary, and a retrieval pipeline
+// chunking for `text-embedding-3-small` and one chunking for a local
+// Llama need different counts from the same document.
+//
+// A FUNCTION VALUE AND NOT A TRAIT, and the reason is the effect
+// system rather than taste.  SPEC § 5.6 gives effect parameters to
+// traits and not to free functions, so a `core` function that called
+// an effectful trait method would inherit a concrete row and leave the
+// `core` budget — and a tokenizer that loads its vocabulary from a file
+// is exactly such a method.  A `fn(Str) -> Int` cannot carry an effect,
+// so the caller loads its vocabulary once, in its own `[fs]`, and
+// hands in a closure over it.
+//
+// THE UNIT IS SHARED BY THE SIZE AND THE OVERLAP
+//
+// "A chunk of 500 with an overlap of 50" is only meaningful if both
+// numbers are in the same unit, and a library that measured the size
+// in tokens and the overlap in characters would be producing overlaps
+// that varied with the language.  So `ChunkLimit` carries the unit
+// once and both numbers under it.
+
+// How a chunk's size is measured.
+//
+// ```novo
+// use chunksize
+//
+// fn main() [io]
+//     println(chunksize.unit_name(chunksize.by_chars()))   // chars
+// ```
+pub enum ChunkUnit
+    // Unicode scalar values.  What a person means by "500
+    // characters", and not the same as bytes for anything but ASCII.
+    ChunkByChars
+    // Bytes.  What a storage limit is usually in.
+    ChunkByBytes
+    // Whatever the caller's function counts.  The function is carried
+    // in the variant, so a limit and its counter cannot be separated
+    // and handed to different calls.
+    ChunkByTokens(count: fn(Str) -> Int)
+
+// A size limit and an overlap, in one unit.
+//
+// ```novo
+// use chunksize
+//
+// fn main() [io]
+//     match chunksize.limit(chunksize.by_chars(), 500, 50)
+//         Ok(l)  => println("${l.size}")        // 500
+//         Err(e) => println(e.message())
+// ```
+pub struct ChunkLimit
+    // How the size is measured.
+    unit: ChunkUnit
+    // The largest a chunk may be, in that unit.
+    size: Int
+    // How much of the previous chunk's tail the next chunk repeats, in
+    // the same unit.  Always smaller than `size`: the step between
+    // chunks is `size - overlap`, and a step of zero does not
+    // terminate.
+    overlap: Int
+
+// Measuring by Unicode scalar values.
+//
+// ```novo
+// use chunksize
+//
+// fn main() [io]
+//     println(chunksize.unit_name(chunksize.by_chars()))   // chars
+// ```
+pub fn by_chars() -> ChunkUnit []
+    todo("chunk-nv.chunksize.by_chars")
+
+// Measuring by bytes.
+//
+// ```novo
+// use chunksize
+//
+// fn main() [io]
+//     println(chunksize.unit_name(chunksize.by_bytes()))   // bytes
+// ```
+pub fn by_bytes() -> ChunkUnit []
+    todo("chunk-nv.chunksize.by_bytes")
+
+// Measuring by whatever the caller's function counts.
+//
+// The function is PURE: it takes text and answers a number, and it
+// cannot read a file, because a `core` package's whole surface is
+// effect-free and a function value carries no effect row.  A caller
+// whose tokenizer needs a vocabulary loads it once, in its own code,
+// and closes over it.
+//
+// ```novo
+// use std.str
+// use chunksize
+//
+// fn main() [io]
+//     // A stand-in counter: roughly four characters to a token.
+//     let approx = chunksize.by_tokens(s => str.len(s) / 4)
+//     println(chunksize.unit_name(approx))      // tokens
+// ```
+pub fn by_tokens(count: fn(Str) -> Int) -> ChunkUnit []
+    todo("chunk-nv.chunksize.by_tokens")
+
+// The unit's name: `"chars"`, `"bytes"`, `"tokens"`.
+//
+// ```novo
+// use chunksize
+//
+// fn main() [io]
+//     println(chunksize.unit_name(chunksize.by_bytes()))   // bytes
+// ```
+pub fn unit_name(u: ChunkUnit) -> Str []
+    todo("chunk-nv.chunksize.unit_name")
+
+// How large a piece of text is, in a unit.
+//
+// The one call that reaches a caller's tokenizer, so a caller counting
+// its own invocations counts them here.
+//
+// ```novo
+// use chunksize
+//
+// fn main() [io]
+//     println("${chunksize.measure(chunksize.by_chars(), "hello")}")   // 5
+// ```
+pub fn measure(u: ChunkUnit, text: Str) -> Int []
+    todo("chunk-nv.chunksize.measure")
+
+// A limit, or the refusal that says why it could not exist.
+//
+// `ChunkSizeNotPositive` for a size of zero or less.
+// `ChunkOverlapNegative` for a negative overlap.
+// `ChunkOverlapNotSmaller` when the overlap is not smaller than the
+// size — the step between chunks is `size - overlap`, so that one does
+// not terminate, and clamping it would be choosing a retrieval
+// parameter for the caller.
+//
+// ```novo
+// use chunksize
+//
+// fn main() [io]
+//     match chunksize.limit(chunksize.by_chars(), 200, 200)
+//         Ok(_)  => println("this cannot happen — the step would be zero")
+//         Err(e) => println(e.message())
+// ```
+pub fn limit(unit: ChunkUnit, size: Int, overlap: Int) -> Result<ChunkLimit, ChunkFault> []
+    todo("chunk-nv.chunksize.limit")
+
+// A limit with no overlap.
+//
+// The one under which the chunks concatenate back to the source
+// exactly, which is what a caller storing a document in pieces wants
+// and what a caller feeding an embedding model usually does not.
+//
+// ```novo
+// use chunksize
+//
+// fn main() [io]
+//     match chunksize.no_overlap(chunksize.by_chars(), 500)
+//         Ok(l)  => println("${l.overlap}")     // 0
+//         Err(e) => println(e.message())
+// ```
+pub fn no_overlap(unit: ChunkUnit, size: Int) -> Result<ChunkLimit, ChunkFault> []
+    todo("chunk-nv.chunksize.no_overlap")
+
+// How far the start of one chunk is from the start of the next:
+// `size - overlap`.
+//
+// Always positive, because `limit` refused the configuration that
+// would make it zero.  Public because it is the number that decides
+// how many chunks a document produces, and a caller budgeting an
+// embedding bill wants it before it splits anything.
+//
+// ```novo
+// use chunksize
+//
+// fn main() [io]
+//     match chunksize.limit(chunksize.by_chars(), 500, 50)
+//         Ok(l)  => println("${chunksize.step(l)}")   // 450
+//         Err(e) => println(e.message())
+// ```
+pub fn step(l: ChunkLimit) -> Int []
+    todo("chunk-nv.chunksize.step")
+
+// Roughly how many chunks a source of this measured size will produce.
+//
+// An estimate, and it says so: the recursive and markdown splitters
+// break at structure rather than at the limit, so they produce fewer,
+// larger-spaced chunks than this. What a caller sizing a queue or a
+// bill wants before it starts.
+//
+// ```novo
+// use chunksize
+//
+// fn main() [io]
+//     match chunksize.limit(chunksize.by_chars(), 500, 50)
+//         Ok(l)  => println("${chunksize.estimate_count(l, 5000)}")
+//         Err(e) => println(e.message())
+// ```
+pub fn estimate_count(l: ChunkLimit, source_measure: Int) -> Int []
+    todo("chunk-nv.chunksize.estimate_count")
+
+// Whether a piece of text fits the limit.
+//
+// ```novo
+// use chunksize
+//
+// fn main() [io]
+//     match chunksize.limit(chunksize.by_chars(), 10, 2)
+//         Ok(l)  => println("${chunksize.fits(l, "hello")}")   // true
+//         Err(e) => println(e.message())
+// ```
+pub fn fits(l: ChunkLimit, text: Str) -> Bool []
+    todo("chunk-nv.chunksize.fits")

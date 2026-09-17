@@ -1,0 +1,283 @@
+// chunksplit_tests.nv — the splitters, and the two invariants every
+// one of them holds.
+//
+// RED ON PURPOSE: every body under `src/` is a `todo()`, so every
+// assertion here reaches `not implemented: chunk-nv.<module>.<fn>`.
+//
+// THERE IS NO SPECIFICATION TO QUOTE.  The reference implementations
+// are the Rust crate `text-splitter` and LangChain's text splitters,
+// and they differ from each other on a paragraph longer than the
+// limit.  So this suite asserts THIS PACKAGE'S OWN RULES, which are
+// the two written in the README:
+//
+//   no chunk exceeds the limit unless a single indivisible unit does;
+//   with an overlap of zero the chunks concatenate back to the source.
+
+use std.test
+use std.list
+use std.str
+use chunkfault
+use chunkspan
+use chunksize
+use chunktext
+use chunkmd
+
+// A document with two paragraphs, a heading and a fenced code block.
+fn doc() -> Str
+    "# Guide\n\nFirst paragraph here.\n\nSecond one.\n\n```\nfn f()\n    g()\n```\n"
+
+@test
+fn test_the_default_separator_lists_are_ordered_most_specific_first() [io]
+    test.case("prose has at least the paragraph, line and word breaks")
+    let p = chunktext.prose_separators()
+    test.assert(list.len(p) >= 4)
+    test.assert(list.get(p, 0) == "\n\n")
+
+    test.case("and the last is a space, so words are the finest boundary")
+    test.assert(list.get(p, list.len(p) - 1) == " ")
+
+    test.case("code has its own, deliberately crude list")
+    test.assert(list.len(chunktext.code_separators()) >= 2)
+    test.assert(list.get(chunktext.code_separators(), 0) == "\n\n")
+
+@test
+fn test_the_fixed_splitter_respects_nothing_but_the_measure() [io]
+    test.case("eleven characters at five is three chunks")
+    match chunksize.no_overlap(chunksize.by_chars(), 5)
+        Err(e) => test.fail(e.message())
+        Ok(l)  =>
+            match chunktext.split_fixed("hello world", l)
+                Err(e) => test.fail(e.message())
+                Ok(ps) =>
+                    test.assert(list.len(ps) == 3)
+                    test.assert(chunkspan.piece_text(list.get(ps, 0),
+                                                     "hello world") == "hello")
+
+    test.case("and they rejoin to the source, because the overlap is zero")
+    match chunksize.no_overlap(chunksize.by_chars(), 5)
+        Err(e) => test.fail(e.message())
+        Ok(l)  =>
+            match chunktext.split_fixed("hello world", l)
+                Err(e) => test.fail(e.message())
+                Ok(ps) =>
+                    test.assert(chunkspan.covers_source(ps, 11))
+                    test.assert(chunkspan.rejoin(ps, "hello world") == "hello world")
+
+    test.case("an empty source is no chunks, not one empty chunk")
+    match chunksize.no_overlap(chunksize.by_chars(), 5)
+        Err(e) => test.fail(e.message())
+        Ok(l)  =>
+            match chunktext.split_fixed("", l)
+                Ok(ps) => test.assert(list.len(ps) == 0)
+                Err(e) => test.fail(e.message())
+
+    test.case("a source under the limit is one chunk")
+    match chunksize.no_overlap(chunksize.by_chars(), 100)
+        Err(e) => test.fail(e.message())
+        Ok(l)  =>
+            match chunktext.split_fixed("hello world", l)
+                Ok(ps) => test.assert(list.len(ps) == 1)
+                Err(e) => test.fail(e.message())
+
+@test
+fn test_a_byte_limit_never_cuts_a_utf8_sequence_in_half() [io]
+    // A chunk that is not valid text is of no use to anything
+    // downstream, so a byte limit is an upper bound that may be
+    // undershot by up to three.
+    test.case("four Japanese characters at a five-byte limit")
+    match chunksize.no_overlap(chunksize.by_bytes(), 5)
+        Err(e) => test.fail(e.message())
+        Ok(l)  =>
+            match chunktext.split_fixed("日本語版", l)
+                Err(e) => test.fail(e.message())
+                Ok(ps) =>
+                    // Each character is three bytes, so a five-byte
+                    // chunk holds one and undershoots by two.
+                    test.assert(list.len(ps) == 4)
+                    test.assert(chunkspan.byte_length(list.get(ps, 0).span) == 3)
+
+    test.case("and the pieces still cover the source exactly")
+    match chunksize.no_overlap(chunksize.by_bytes(), 5)
+        Err(e) => test.fail(e.message())
+        Ok(l)  =>
+            match chunktext.split_fixed("日本語版", l)
+                Ok(ps) => test.assert(chunkspan.covers_source(ps, 12))
+                Err(e) => test.fail(e.message())
+
+@test
+fn test_the_recursive_splitter_tries_the_separators_in_order() [io]
+    test.case("a source that fits is one chunk whatever the separators say")
+    match chunksize.limit(chunksize.by_chars(), 100, 10)
+        Err(e) => test.fail(e.message())
+        Ok(l)  =>
+            match chunktext.split_recursive("a\n\nb", l, chunktext.prose_separators())
+                Ok(ps) => test.assert(list.len(ps) == 1)
+                Err(e) => test.fail(e.message())
+
+    test.case("a source that does not is split at the first separator that helps")
+    match chunksize.no_overlap(chunksize.by_chars(), 8)
+        Err(e) => test.fail(e.message())
+        Ok(l)  =>
+            match chunktext.split_recursive("alpha\n\nbeta", l,
+                                            chunktext.prose_separators())
+                Err(e) => test.fail(e.message())
+                Ok(ps) =>
+                    test.assert(list.len(ps) == 2)
+                    test.assert(chunkspan.rejoin(ps, "alpha\n\nbeta") == "alpha\n\nbeta")
+
+    test.case("an empty separator list is refused — the caller meant split_fixed")
+    match chunksize.limit(chunksize.by_chars(), 100, 10)
+        Err(e) => test.fail(e.message())
+        Ok(l)  =>
+            match chunktext.split_recursive("a\n\nb", l, [])
+                Ok(_)  => test.fail("there is nothing to split at")
+                Err(e) => test.assert(chunkfault.code(e) == "no_separators")
+
+    test.case("the prose convenience is the same call with the default list")
+    match chunksize.limit(chunksize.by_chars(), 100, 10)
+        Err(e) => test.fail(e.message())
+        Ok(l)  =>
+            match chunktext.split_prose("one paragraph", l)
+                Ok(ps) => test.assert(list.len(ps) == 1)
+                Err(e) => test.fail(e.message())
+
+@test
+fn test_a_word_longer_than_the_limit_is_emitted_whole_and_oversize() [io]
+    // The alternative is cutting a word in half, and the alternative
+    // to that is dropping it.
+    test.case("one long word at a short limit is one chunk over the limit")
+    match chunksize.no_overlap(chunksize.by_chars(), 4)
+        Err(e) => test.fail(e.message())
+        Ok(l)  =>
+            match chunktext.split_recursive("supercalifragilistic", l,
+                                            chunktext.prose_separators())
+                Err(e) => test.fail(e.message())
+                Ok(ps) =>
+                    test.assert(list.len(chunktext.oversize_pieces(ps, l)) >= 1)
+
+    test.case("and a caller finds out before it sends one to a model")
+    match chunksize.no_overlap(chunksize.by_chars(), 100)
+        Err(e) => test.fail(e.message())
+        Ok(l)  =>
+            match chunktext.split_prose("short", l)
+                Ok(ps) => test.assert(list.len(chunktext.oversize_pieces(ps, l)) == 0)
+                Err(e) => test.fail(e.message())
+
+    test.case("the well-formedness predicate is what the suite checks against")
+    match chunksize.no_overlap(chunksize.by_chars(), 5)
+        Err(e) => test.fail(e.message())
+        Ok(l)  =>
+            test.assert(chunktext.is_well_formed([], "", l))
+            match chunktext.split_fixed("hello world", l)
+                Ok(ps) => test.assert(chunktext.is_well_formed(ps, "hello world", l))
+                Err(e) => test.fail(e.message())
+
+@test
+fn test_the_token_convenience_takes_the_counter_and_nothing_else() [io]
+    test.case("a document under the token limit is one chunk")
+    match chunktext.split_by_tokens("some text", 256, 32, s => str.len(s) / 4)
+        Ok(ps) => test.assert(list.len(ps) == 1)
+        Err(e) => test.fail(e.message())
+
+    test.case("and the configuration refusals still apply")
+    match chunktext.split_by_tokens("some text", 10, 10, s => str.len(s) / 4)
+        Ok(_)  => test.fail("the step would be zero")
+        Err(e) => test.assert(chunkfault.code(e) == "overlap_not_smaller")
+
+@test
+fn test_the_separator_offsets_are_available_on_their_own() [io]
+    test.case("one paragraph break")
+    test.assert(list.len(chunktext.separator_offsets("a\n\nb", "\n\n")) == 1)
+    test.assert(list.get(chunktext.separator_offsets("a\n\nb", "\n\n"), 0) == 1)
+
+    test.case("none when the separator does not occur")
+    test.assert(list.len(chunktext.separator_offsets("abc", "\n\n")) == 0)
+
+    test.case("and several when it does")
+    test.assert(list.len(chunktext.separator_offsets("a b c d", " ")) == 3)
+
+@test
+fn test_the_markdown_rule_names_what_may_not_be_split() [io]
+    let r = chunkmd.default_rule()
+
+    test.case("the defaults split at # and ## and keep the structures whole")
+    test.assert(r.split_at_level == 2)
+    test.assert(r.keep_code_blocks_whole)
+    test.assert(r.keep_tables_whole)
+    test.assert(r.keep_lists_whole)
+    test.assert(r.prepend_headings)
+
+    test.case("each is set on its own")
+    test.assert(chunkmd.with_split_level(r, 3).split_at_level == 3)
+    test.assert(not chunkmd.without_headings(r).prepend_headings)
+    test.assert(not chunkmd.with_keep_whole(r, false, false, false).keep_tables_whole)
+
+@test
+fn test_a_fenced_code_block_is_never_split() [io]
+    // A separator scan that put "\n\n" first would cut code in half,
+    // because a fence can contain blank lines and lines beginning
+    // with #.
+    test.case("the fence is one atomic span")
+    let src = "```\nfn f()\n\n    g()\n```\n"
+    test.assert(list.len(chunkmd.atomic_spans(src, chunkmd.default_rule())) == 1)
+
+    test.case("and an offset inside it is atomic")
+    test.assert(chunkmd.is_atomic_at(src, 8, chunkmd.default_rule()))
+
+    test.case("an offset outside it is not")
+    test.assert(not chunkmd.is_atomic_at("plain text\n", 3, chunkmd.default_rule()))
+
+    test.case("turning the flag off removes the span")
+    test.assert(list.len(chunkmd.atomic_spans(
+        src, chunkmd.with_keep_whole(chunkmd.default_rule(), false, false, false))) == 0)
+
+@test
+fn test_a_heading_is_context_and_the_span_stays_a_citation() [io]
+    // A chunk with its heading trail in front is no longer a span of
+    // the source, so the two are carried separately: the span cites,
+    // and piece_text builds what is embedded.
+    test.case("the heading trail in force at an offset")
+    test.assert(list.len(chunkmd.headings_at("# A\n\ntext\n", 6)) == 1)
+    test.assert(list.get(chunkmd.headings_at("# A\n\ntext\n", 6), 0) == "A")
+
+    test.case("no heading before the first one")
+    test.assert(list.len(chunkmd.headings_at("text\n\n# A\n", 1)) == 0)
+
+    test.case("a split carries the trail beside the span")
+    match chunksize.limit(chunksize.by_chars(), 500, 50)
+        Err(e) => test.fail(e.message())
+        Ok(l)  =>
+            match chunkmd.split(doc(), l, chunkmd.default_rule())
+                Err(e) => test.fail(e.message())
+                Ok(ps) =>
+                    test.assert(chunkmd.piece_count(ps) >= 1)
+                    test.assert(list.get(ps, 0).level >= 0)
+
+    test.case("and the text a caller embeds is assembled, not sliced")
+    match chunksize.limit(chunksize.by_chars(), 500, 50)
+        Err(e) => test.fail(e.message())
+        Ok(l)  =>
+            match chunkmd.split(doc(), l, chunkmd.default_rule())
+                Err(e) => test.fail(e.message())
+                Ok(ps) =>
+                    test.assert(str.len(chunkmd.piece_text(list.get(ps, 0), doc())) > 0)
+
+@test
+fn test_the_sections_and_the_conversion_to_plain_pieces() [io]
+    test.case("two top-level headings are two sections")
+    test.assert(list.len(chunkmd.section_spans("# A\n\nx\n\n# B\n\ny\n", 1)) == 2)
+
+    test.case("a document with no heading is one section")
+    test.assert(list.len(chunkmd.section_spans("just text\n", 1)) == 1)
+
+    test.case("markdown pieces convert to plain ones, dropping the trail")
+    match chunksize.limit(chunksize.by_chars(), 500, 50)
+        Err(e) => test.fail(e.message())
+        Ok(l)  =>
+            match chunkmd.split(doc(), l, chunkmd.default_rule())
+                Err(e) => test.fail(e.message())
+                Ok(ps) => test.assert(list.len(chunkmd.to_pieces(ps))
+                                      == chunkmd.piece_count(ps))
+
+    test.case("and no pieces convert to no pieces")
+    test.assert(list.len(chunkmd.to_pieces([])) == 0)

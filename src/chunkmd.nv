@@ -1,0 +1,265 @@
+// chunkmd.nv — splitting a Markdown document where its structure
+// allows.
+//
+// WHY A MARKDOWN SPLITTER IS NOT A SEPARATOR LIST
+//
+// The obvious approach is to put `"\n## "` at the front of the
+// separator list and call it markdown-aware.  It is wrong in three
+// specific ways, and all three show up in real documentation:
+//
+//   A FENCED CODE BLOCK can contain anything, including blank lines,
+//   lines beginning with `#`, and its own fence characters inside a
+//   longer fence.  A separator scan splits code in half.
+//
+//   A TABLE is meaningless without its header row.  Split between the
+//   header and the body and both halves are useless: one is a header
+//   with no data, the other is data with no columns.
+//
+//   A HEADING IS CONTEXT FOR EVERYTHING UNDER IT.  A chunk taken from
+//   the middle of a long section, retrieved on its own, has lost the
+//   title that says what it is about — which is the single commonest
+//   cause of a retrieval system answering about the wrong subject.
+//
+// So this splitter works over markdown-nv's parse: it knows where the
+// code blocks are because the parser does, it keeps a table whole
+// because the parser says where it ends, and it can put the heading
+// trail in front of a chunk because the parser gives the levels.
+//
+// THE HEADING TRAIL IS PREPENDED TEXT, AND IT BREAKS THE SPAN
+//
+// A chunk with `# Guide / ## Installing` in front of it is no longer
+// a span of the source, because that text is not contiguous with it.
+// So `ChunkMdPiece` carries the span AND the prefix separately: the
+// span still points at the document for citation, and
+// `chunkmd.piece_text` is what builds the string to embed.  Collapsing
+// the two into one string would have destroyed the citation, which is
+// the thing spans exist for.
+
+use chunksize
+
+// How a Markdown document is split.
+//
+// ```novo
+// use chunkmd
+//
+// fn main() [io]
+//     println("${chunkmd.default_rule().keep_code_blocks_whole}")   // true
+// ```
+pub struct ChunkMdRule
+    // The heading level at or above which a split is always made: 1
+    // splits at every `#`, 2 at every `#` and `##`, 0 never splits at
+    // a heading alone.
+    split_at_level: Int
+    // Whether a fenced or indented code block is kept in one chunk
+    // however large it is.  A code block cut in half is not code.
+    keep_code_blocks_whole: Bool
+    // Whether a table is kept whole, header row included.  A table
+    // split between its header and its body leaves two useless halves.
+    keep_tables_whole: Bool
+    // Whether a list is kept whole when it fits.
+    keep_lists_whole: Bool
+    // Whether the enclosing headings are prepended to each chunk's
+    // text.  The single most effective thing a Markdown splitter does
+    // for retrieval quality, and the thing that makes a chunk's text
+    // no longer a span of the source.
+    prepend_headings: Bool
+
+// One Markdown chunk: where it is, and what goes in front of it.
+//
+// ```novo
+// use chunkmd
+//
+// fn main() [io]
+//     println("${chunkmd.piece_count([])}")     // 0
+// ```
+pub struct ChunkMdPiece
+    // Where the chunk's own text is in the source.  Still exact, still
+    // citable, and NOT including the prefix.
+    span: ChunkSpan
+    // Which chunk this is, counting from zero.
+    index: Int
+    // How large it measured, prefix included, in the limit's unit.
+    measure: Int
+    // The enclosing headings, outermost first, or empty when the rule
+    // does not prepend them.  Text rather than spans because it is
+    // assembled from several places in the document and is no longer
+    // contiguous with anything.
+    heading_trail: [Str]
+    // The deepest heading level this chunk sits under, or `0` when it
+    // sits under none.
+    level: Int
+
+// The ordinary rule: split at `#` and `##`, keep code blocks, tables
+// and lists whole, prepend the headings.
+//
+// ```novo
+// use chunkmd
+//
+// fn main() [io]
+//     println("${chunkmd.default_rule().split_at_level}")   // 2
+// ```
+pub fn default_rule() -> ChunkMdRule []
+    todo("chunk-nv.chunkmd.default_rule")
+
+// The same rule with a different heading level to split at.
+//
+// ```novo
+// use chunkmd
+//
+// fn main() [io]
+//     println("${chunkmd.with_split_level(chunkmd.default_rule(), 3).split_at_level}")
+// ```
+pub fn with_split_level(r: ChunkMdRule, level: Int) -> ChunkMdRule []
+    todo("chunk-nv.chunkmd.with_split_level")
+
+// The same rule with the heading prefix turned off.
+//
+// For a caller that stores the heading trail beside the chunk rather
+// than inside it — which is the better shape when the store has
+// metadata fields, because the headings can then be filtered on as
+// well as searched.
+//
+// ```novo
+// use chunkmd
+//
+// fn main() [io]
+//     println("${chunkmd.without_headings(chunkmd.default_rule()).prepend_headings}")
+// ```
+pub fn without_headings(r: ChunkMdRule) -> ChunkMdRule []
+    todo("chunk-nv.chunkmd.without_headings")
+
+// The same rule with the structure-keeping flags set together.
+//
+// ```novo
+// use chunkmd
+//
+// fn main() [io]
+//     let r = chunkmd.with_keep_whole(chunkmd.default_rule(), false, false, false)
+//     println("${r.keep_tables_whole}")         // false
+// ```
+pub fn with_keep_whole(r: ChunkMdRule, code: Bool, tables: Bool, lists: Bool) -> ChunkMdRule []
+    todo("chunk-nv.chunkmd.with_keep_whole")
+
+// Split a Markdown document.
+//
+// The structure decides where a split MAY fall and the limit decides
+// where one MUST: a section that fits is one chunk whatever its
+// headings say, and a section that does not is split by
+// `chunktext.split_recursive` inside its own boundaries.
+//
+// ```novo
+// use std.list
+// use chunkmd
+// use chunksize
+//
+// fn main() [io]
+//     match chunksize.limit(chunksize.by_chars(), 500, 50)
+//         Err(e) => println(e.message())
+//         Ok(l)  =>
+//             match chunkmd.split("# Title\n\nSome text.\n", l, chunkmd.default_rule())
+//                 Ok(ps) => println("${list.len(ps)}")   // 1
+//                 Err(e) => println(e.message())
+// ```
+pub fn split(source: Str, l: ChunkLimit, r: ChunkMdRule) -> Result<[ChunkMdPiece], ChunkFault> []
+    todo("chunk-nv.chunkmd.split")
+
+// A Markdown chunk's text: the heading trail, then the span's own
+// text.
+//
+// THE FUNCTION THAT ASSEMBLES WHAT IS EMBEDDED, and it is separate
+// from the span so that the span stays a citation.  A caller that
+// stores the two apart never calls it.
+//
+// ```novo
+// use chunkmd
+//
+// fn main() [io]
+//     println("${chunkmd.piece_count([])}")     // 0
+// ```
+pub fn piece_text(p: ChunkMdPiece, source: Str) -> Str []
+    todo("chunk-nv.chunkmd.piece_text")
+
+// How many pieces a split produced.
+//
+// ```novo
+// use chunkmd
+//
+// fn main() [io]
+//     println("${chunkmd.piece_count([])}")     // 0
+// ```
+pub fn piece_count(pieces: [ChunkMdPiece]) -> Int []
+    todo("chunk-nv.chunkmd.piece_count")
+
+// A Markdown piece as a plain one, dropping the heading trail.
+//
+// For a caller that wants one list of `ChunkPiece` across a mixed
+// corpus of Markdown and plain text, and stores the headings
+// separately.
+//
+// ```novo
+// use std.list
+// use chunkmd
+//
+// fn main() [io]
+//     println("${list.len(chunkmd.to_pieces([]))}")   // 0
+// ```
+pub fn to_pieces(pieces: [ChunkMdPiece]) -> [ChunkPiece] []
+    todo("chunk-nv.chunkmd.to_pieces")
+
+// The spans of the document that may not be split inside, under a
+// rule: the code blocks, the tables and the lists it keeps whole.
+//
+// Public because it is the rule made visible: a caller wondering why a
+// chunk came out four times the limit can look at this and see the
+// code block it contains.
+//
+// ```novo
+// use std.list
+// use chunkmd
+//
+// fn main() [io]
+//     let atomic = chunkmd.atomic_spans("```\ncode\n```\n", chunkmd.default_rule())
+//     println("${list.len(atomic)}")            // 1
+// ```
+pub fn atomic_spans(source: Str, r: ChunkMdRule) -> [ChunkSpan] []
+    todo("chunk-nv.chunkmd.atomic_spans")
+
+// The heading trail in force at a byte offset, outermost first.
+//
+// ```novo
+// use std.list
+// use chunkmd
+//
+// fn main() [io]
+//     println("${list.len(chunkmd.headings_at("# A\n\ntext\n", 6))}")   // 1
+// ```
+pub fn headings_at(source: Str, offset: Int) -> [Str] []
+    todo("chunk-nv.chunkmd.headings_at")
+
+// The spans the document's sections occupy at or above a heading
+// level, in document order.
+//
+// The structural split on its own, without the size limit.  What a
+// caller building a table of contents wants, and what a caller that
+// intends to chunk each section with different settings starts from.
+//
+// ```novo
+// use std.list
+// use chunkmd
+//
+// fn main() [io]
+//     println("${list.len(chunkmd.section_spans("# A\n\nx\n\n# B\n\ny\n", 1))}")   // 2
+// ```
+pub fn section_spans(source: Str, level: Int) -> [ChunkSpan] []
+    todo("chunk-nv.chunkmd.section_spans")
+
+// Whether a byte offset falls inside a span that must not be split.
+//
+// ```novo
+// use chunkmd
+//
+// fn main() [io]
+//     println("${chunkmd.is_atomic_at("```\ncode\n```\n", 5, chunkmd.default_rule())}")
+// ```
+pub fn is_atomic_at(source: Str, offset: Int, r: ChunkMdRule) -> Bool []
+    todo("chunk-nv.chunkmd.is_atomic_at")
