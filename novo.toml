@@ -1,6 +1,6 @@
 [package]
 name        = "chunk-nv"
-version     = "0.0.1"
+version     = "0.0.2"
 description = "Splitting text for retrieval: by characters, by bytes, by tokens counted by a function the caller supplies, recursively down an ordered list of separators, and markdown-aware over markdown-nv.  Every chunk carries its byte span in the source rather than a copied string, the size limit and the overlap are measured in the same unit, and an overlap that is not smaller than the chunk is refused.  Interface only — every body is a todo()."
 license     = "Apache-2.0"
 
@@ -47,4 +47,4 @@ novo        = ">= 0.9.0"
 # wrong on a fence inside a list item inside a block quote.
 #
 # `core`, so the layer rule holds.  `^0.0.1` pins exactly 0.0.1.
-markdown-nv = "^0.0.1"
+markdown-nv = "^0.1.0"
